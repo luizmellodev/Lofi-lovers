@@ -1,89 +1,71 @@
-require('dotenv').config();
-const { readdirSync } = require('fs');
-const { join } = require('path');
-const MusicClient = require('./struct/Client');
-const { Collection } = require('discord.js');
-const client = new MusicClient({ token: process.env.DISCORD_TOKEN, prefix: process.env.DISCORD_PREFIX, debug: process.env.DEBUG });
+import 'dotenv/config'
+import discord from "discord.js"
+import ytdl from "ytdl-core"
 
-const commandFiles = readdirSync(join(__dirname, 'commands')).filter(file => file.endsWith('.js'));
-for (const file of commandFiles) {
-	const command = require(join(__dirname, 'commands', `${file}`));
-	client.commands.set(command.name, command);
+const { url, channelId, token } = process.env
+const client = new discord.Client();
+
+let broadcast = null;
+let interval = null;
+
+if (!token) {
+  console.error("token inválido");
+  process.exit(1);
+} else if (!channelId || Number(channelId) == NaN) {
+  console.log("id inválido");
+  process.exit(1);
+} else if (!ytdl.validateURL(url)) {
+  console.log("link inválido");
+  process.exit(1);
 }
 
-client.once('ready', () => {
-	console.log(`Logado com o bot ${client.user.tag} em ${client.guilds.cache.size} servidores`);
-	client.user.setActivity(';ajuda ou ;comandos', { type: 'PLAYING' })
+client.on('ready', async () => {
+  client.user.setActivity("Coding with Lo-fi");
+  let channel = client.channels.cache.get(channelId) || await client.channels.fetch(channelId)
+
+  if (!channel) {
+    console.error("esse canal não existe");
+    return process.exit(1);
+  } else if (channel.type !== "voice") {
+    console.error("esse id não corresponde a um canal de voz");
+    return process.exit(1);
+  }
+
+  broadcast = client.voice.createBroadcast();
+  let stream = ytdl(url);
+  stream.on('error', console.error);
+  broadcast.play(stream);
+  if (!interval) {
+    interval = setInterval(async function () {
+      try {
+        if (stream && !stream.ended) stream.destroy();
+        stream = ytdl(url, { highWaterMark: 100 << 150 });
+        stream.on('error', console.error);
+        broadcast.play(stream);
+      } catch (e) { return }
+    }, 1800000)
+  }
+  try {
+    const connection = await channel.join();
+    connection.play(broadcast);
+  } catch (error) {
+    console.error(error);
+  }
 });
 
-client.on('message', message => {
-	// !abc #nomedocanal
-	if (message.attachments.size > 0 && message.content.split(' ')[0] == `${client.config.prefix}imagem`) {
-		if (message.author.id == client.user.id) {
-			return;
-		}
-		return client.commands.get('imagem').execute(client, message);
-	}
+setInterval(async function () {
+  if (!client.voice.connections.size) {
+    let channel = client.channels.cache.get(channelId) || await client.channels.fetch(channelId);
+    if (!channel) return;
+    try {
+      const connection = await channel.join();
+      connection.play(broadcast);
+    } catch (error) {
+      console.error(error);
+    }
+  }
+}, 20000);
 
-	if (client.config.debug) {
-		console.log(`${message.author}: ${message.content}`);
-	}
-	if (!message.content.startsWith(client.config.prefix) || message.author.bot) return;
-	const args = message.content.slice(client.config.prefix.length).split(/ +/);
-	const commandName = args.shift().toLowerCase();
-	const command = client.commands.get(commandName) || client.commands.find(cmd => cmd.aliases && cmd.aliases.includes(commandName));
+client.login(token)
 
-
-	if (message.content == ';testando') {
-		console.log(args);
-		console.log(commandName);
-		console.log(command);
-	}
-
-
-	if (!command) return;
-	if (command.guildOnly && message.channel.type !== 'text') return message.reply('oi.. por que está sussurando aqui no privado? hihi.. enfim, não posso executar nenhum comando no privado, apenas nos canais de bot!');
-	if (command.args && !args.length) {
-		let reply = `quase fiz o que pediu, só faltou dizer o comando!, ${message.author}!`;
-		if (command.usage) reply += `\nÉ..quase isso! O certo seria: \`${client.config.prefix}${command.name} ${command.usage}\``;
-		return message.channel.send(reply);
-	}
-	if (!client.cooldowns.has(command.name)) {
-		client.cooldowns.set(command.name, new Collection());
-	}
-	const now = Date.now();
-	const timestamps = client.cooldowns.get(command.name);
-	const cooldownAmount = (command.cooldown || 3) * 1000;
-	if (timestamps.has(message.author.id)) {
-		const expirationTime = timestamps.get(message.author.id) + cooldownAmount;
-		if (now < expirationTime) {
-			const timeLeft = (expirationTime - now) / 1000;
-			return message.reply(`epa, vai com calma! Espere ${timeLeft.toFixed(1)} segundos para usar o comando \`${command.name}\``);
-		}
-	}
-	timestamps.set(message.author.id, now);
-	setTimeout(() => timestamps.delete(message.author.id), cooldownAmount);
-
-	try {
-		command.execute(client, message, args);
-	} catch (error) {
-		console.error(error);
-		message.reply('ocorreu um erro durante a execução deste comando, vou me auto investigar!');
-		//message.reply('ocorreu um erro durante a execução deste comando, o desenvolvedor saiu para tomar café, mas ele já volta para corrigir o problema!');
-	}
-});
-
-
-client.on('guildMemberAdd', member => {
-	const channel = member.guild.channels.cache.find(ch => ch.name === 'member-log');
-	if (!channel) return;
-	channel.send(`Bem vindo ao servidor, ${member}!! Leia as regras e divirta-se!`);
-});
-
-client.on('guildMemberRemove', member => {
-	const channel = member.guild.channels.cache.find(ch => ch.name === 'member-log');
-	if (!channel) return;
-	channel.send(`${member} saiu do servidor... :/`);
-});
-
-client.login(client.config.DISCORD_TOKEN);
+process.on('unhandledRejection', console.error);
