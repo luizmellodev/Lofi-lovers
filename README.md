@@ -1,6 +1,10 @@
-# Codefi - Under construction 👨‍💻
+# Lofi Lovers - Under construction 👨‍💻
 
-# Tecnologias utilizadas:
+
+A discord bot that plays 24/7 lo-fi on a specific channel on your server on Discord.
+
+
+# Technologies used:
 
 ### [Node.js](https://nodejs.org/en/)
 
